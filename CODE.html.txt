@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SmartQR — Customer</title>
+  <link rel="stylesheet" href="customer.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">SmartQR — Customer</div>
+    <nav><a href="kitchen.html">Kitchen</a> | <a href="owner.html">Owner</a></nav>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <h1>Scan Result — Menu</h1>
+      <p class="muted">Select items to add to your cart. Place order and pay from here.</p>
+      <div id="menuGrid" class="menu-grid"></div>
+    </section>
+
+    <section class="card" style="margin-top:16px;">
+      <h2>Your Cart</h2>
+      <div id="cartArea" class="cart-list"><div class="muted">Cart is empty</div></div>
+
+      <div class="cart-footer">
+        <div class="muted">Total: <strong id="cartTotal">₹0</strong></div>
+        <div class="actions">
+          <button class="btn ghost" onclick="clearCart()">Clear</button>
+          <button class="btn" onclick="placeOrder()">Place Order</button>
+        </div>
+      </div>
+
+      <div id="paymentArea" class="card payment" style="display:none;margin-top:12px;">
+        <h3>Make Payment (Customer only)</h3>
+        <div class="muted text-sm">Demo payment - no real card is charged</div>
+        <input id="cardName" placeholder="Name on card" />
+        <input id="cardNumber" placeholder="Card number (mock)" />
+        <button class="btn" onclick="payOrder()">Pay & Confirm</button>
+      </div>
+    </section>
+  </main>
+
+<script>
+/* ====== Customer module script ====== */
+const STORAGE_KEY = 'smartqr_orders_v1';
+const MENU = [
+  {id:1,name:'Paneer Tikka',price:220,desc:'Grilled paneer'},
+  {id:2,name:'Classic Burger',price:180,desc:'Beef burger'},
+  {id:3,name:'Veg Biryani',price:240,desc:'Aromatic biryani'},
+  {id:4,name:'Caesar Salad',price:150,desc:'Fresh salad'},
+  {id:5,name:'Chocolate Mousse',price:140,desc:'Dessert'},
+  {id:6,name:'Masala Dosa',price:120,desc:'South Indian dosa'}
+];
+
+let cart = {};
+let orders = loadOrders();
+
+function loadOrders(){
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
+  catch(e){ return []; }
+}
+function saveOrders(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(orders)); }
+
+function renderMenu(){
+  const grid = document.getElementById('menuGrid');
+  grid.innerHTML = '';
+  MENU.forEach(m=>{
+    const el = document.createElement('div');
+    el.className = 'menu-item';
+    el.innerHTML = `
+      <div class="thumb">${m.name.split(' ').map(s=>s[0]).slice(0,2).join('')}</div>
+      <div class="mi-info">
+        <div class="mi-name">${m.name}</div>
+        <div class="muted">${m.desc}</div>
+      </div>
+      <div class="mi-actions">
+        <div class="price">₹${m.price}</div>
+        <button class="btn small" onclick="addToCart(${m.id})">Add</button>
+      </div>
+    `;
+    grid.appendChild(el);
+  });
+}
+function renderCart(){
+  const area = document.getElementById('cartArea');
+  area.innerHTML = '';
+  const keys = Object.keys(cart);
+  if(keys.length===0){ area.innerHTML = '<div class="muted">Cart is empty</div>'; document.getElementById('paymentArea').style.display='none'; updateCartTotal(); return; }
+  keys.forEach(k=>{
+    const it = MENU.find(x=>x.id==k);
+    const qty = cart[k];
+    const row = document.createElement('div');
+    row.className = 'cart-row';
+    row.innerHTML = `<div><strong>${it.name}</strong><div class="muted">₹${it.price} each</div></div>
+      <div class="cart-controls">
+        <div class="qty">
+          <button onclick="changeQty(${it.id}, -1)">-</button>
+          <span>${qty}</span>
+          <button onclick="changeQty(${it.id}, 1)">+</button>
+        </div>
+        <div class="item-total">₹${it.price * qty}</div>
+      </div>`;
+    area.appendChild(row);
+  });
+  document.getElementById('paymentArea').style.display='block';
+  updateCartTotal();
+}
+function updateCartTotal(){
+  let total = 0;
+  Object.keys(cart).forEach(k=>{ const it = MENU.find(m=>m.id==k); total += it.price * cart[k]; });
+  document.getElementById('cartTotal').textContent = '₹' + total;
+}
+function addToCart(id){ cart[id] = (cart[id]||0)+1; renderCart(); }
+function changeQty(id, delta){ cart[id] = (cart[id]||0)+delta; if(cart[id]<=0) delete cart[id]; renderCart(); }
+function clearCart(){ if(confirm('Clear cart?')) { cart={}; renderCart(); } }
+
+function placeOrder(){
+  if(Object.keys(cart).length===0){ alert('Cart is empty'); return; }
+  const order = {
+    id: 'ORD' + Date.now().toString().slice(-6),
+    items: Object.entries(cart).map(([id,qty])=>{ const it = MENU.find(m=>m.id==id); return {id:it.id,name:it.name,price:it.price,qty}; }),
+    status: 'placed',
+    paid: false,
+    total: Object.entries(cart).reduce((s,[id,qty])=> s + (MENU.find(m=>m.id==id).price * qty), 0),
+    time: new Date().toISOString()
+  };
+  orders.unshift(order); saveOrders();
+  cart = {}; renderCart(); alert('Order placed. Please pay below to confirm (demo).'); document.getElementById('paymentArea').scrollIntoView({behavior:'smooth'});
+}
+
+function payOrder(){
+  const unpaid = orders.find(o=>!o.paid && o.status!=='completed');
+  if(!unpaid){ alert('No unpaid order to pay.'); return; }
+  const name = document.getElementById('cardName').value.trim();
+  const num = document.getElementById('cardNumber').value.replace(/\s/g,'');
+  if(!name || num.length<6){ alert('Enter mock card details (demo).'); return; }
+  unpaid.paid = true;
+  unpaid.payment = {method:'card',cardName:name,cardLast4:num.slice(-4),time:new Date().toISOString()};
+  saveOrders(); renderCart(); alert('Payment simulated and recorded. Kitchen notified.');
+  // update local copy for kitchen & owner (if open)
+  window.dispatchEvent(new Event('storage'));
+}
+
+/* init */
+renderMenu();
+renderCart();
+</script>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SmartQR — Kitchen</title>
+  <link rel="stylesheet" href="kitchen.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">SmartQR — Kitchen</div>
+    <nav><a href="customer.html">Customer</a> | <a href="owner.html">Owner</a></nav>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <h1>Active Orders</h1>
+      <p class="muted">Kitchen view — update status to preparing, ready or completed.</p>
+
+      <div id="kitchenOrders" class="orders-list"></div>
+    </section>
+  </main>
+
+<script>
+/* ====== Kitchen module script ====== */
+const STORAGE_KEY = 'smartqr_orders_v1';
+let orders = loadOrders();
+
+function loadOrders(){
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
+  catch(e){ return []; }
+}
+function saveOrders(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(orders)); renderOrders(); }
+
+function renderOrders(){
+  const area = document.getElementById('kitchenOrders');
+  area.innerHTML = '';
+  if(orders.length===0){ area.innerHTML = '<div class="muted">No orders yet</div>'; return; }
+  const active = orders.filter(o=> o.status !== 'completed');
+  if(active.length===0){ area.innerHTML = '<div class="muted">No active orders</div>'; return; }
+  active.forEach(o=>{
+    const node = document.createElement('div'); node.className='order-card';
+    node.innerHTML = `
+      <div class="order-head">
+        <div><strong>${o.id}</strong> <span class="muted">${new Date(o.time).toLocaleTimeString()}</span></div>
+        <div>${o.paid ? '<span class="pill paid">PAID</span>' : '<span class="pill unpaid">UNPAID</span>'}</div>
+      </div>
+      <div class="order-items">${o.items.map(it=>`<div class="oi-row">${it.qty} × ${it.name} <span class="muted">₹${it.price * it.qty}</span></div>`).join('')}</div>
+      <div class="order-actions">
+        ${o.status === 'placed' ? `<button onclick="setStatus('${o.id}','preparing')" class="btn">Start Preparing</button>` : ''}
+        ${o.status === 'preparing' ? `<button onclick="setStatus('${o.id}','ready')" class="btn ghost">Mark Ready</button>` : ''}
+        ${o.status === 'ready' ? `<button onclick="setStatus('${o.id}','completed')" class="btn">Complete</button>` : ''}
+        <div class="muted status-text">Status: ${o.status}</div>
+      </div>
+    `;
+    area.appendChild(node);
+  });
+}
+
+function setStatus(id, newStatus){
+  const idx = orders.findIndex(o=>o.id===id);
+  if(idx===-1) return;
+  orders[idx].status = newStatus;
+  saveOrders();
+  // notify others (if open)
+  window.dispatchEvent(new Event('storage'));
+}
+
+/* listen for storage events to update across tabs */
+window.addEventListener('storage', ()=>{
+  orders = loadOrders(); renderOrders();
+});
+/* initialize */
+renderOrders();
+</script>
+</body>
+</html>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SmartQR — Owner</title>
+  <link rel="stylesheet" href="owner.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">SmartQR — Owner</div>
+    <nav><a href="customer.html">Customer</a> | <a href="kitchen.html">Kitchen</a></nav>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <h1>Orders Dashboard</h1>
+      <div class="controls">
+        <label>Filter
+          <select id="filter" onchange="renderOwner()">
+            <option value="all">All</option>
+            <option value="placed">Placed</option>
+            <option value="preparing">Preparing</option>
+            <option value="ready">Ready</option>
+            <option value="completed">Completed</option>
+          </select>
+        </label>
+        <div class="muted totals">Total orders: <strong id="totalCount">0</strong></div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Order</th><th>Time</th><th>Items</th><th>Total</th><th>Paid</th><th>Status</th><th>Action</th></tr></thead>
+          <tbody id="ownerTbody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+<script>
+/* ====== Owner module script ====== */
+const STORAGE_KEY = 'smartqr_orders_v1';
+let orders = loadOrders();
+function loadOrders(){ try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); } catch(e){ return []; } }
+function saveOrders(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(orders)); renderOwner(); }
+
+function renderOwner(){
+  orders = loadOrders();
+  const filter = document.getElementById('filter').value;
+  const tbody = document.getElementById('ownerTbody');
+  tbody.innerHTML = '';
+  const filtered = orders.filter(o=> filter==='all' ? true : o.status === filter);
+  document.getElementById('totalCount').textContent = filtered.length;
+  if(filtered.length===0){ tbody.innerHTML = '<tr><td colspan="7" class="muted">No orders</td></tr>'; return; }
+  filtered.forEach(o=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${o.id}</td>
+      <td>${new Date(o.time).toLocaleString()}</td>
+      <td>${o.items.map(i=>i.qty+'×'+i.name).join(', ')}</td>
+      <td>₹${o.total}</td>
+      <td>${o.paid ? 'Yes ('+(o.payment?.cardLast4||'')+')' : 'No'}</td>
+      <td style="text-transform:capitalize">${o.status}</td>
+      <td>${o.status!=='completed' ? '<button class="btn small" onclick="promptStatus(\\''+o.id+'\\')">Set</button>' : '—'}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function promptStatus(id){
+  const s = prompt('Enter new status (placed / preparing / ready / completed)');
+  if(!s) return;
+  if(!['placed','preparing','ready','completed'].includes(s)) return alert('Invalid status');
+  const idx = orders.findIndex(o=>o.id===id);
+  if(idx===-1) return;
+  orders[idx].status = s;
+  saveOrders();
+  window.dispatchEvent(new Event('storage'));
+}
+
+/* listen storage events to refresh across tabs */
+window.addEventListener('storage', ()=>{ renderOwner(); });
+
+renderOwner();
+</script>
+</body>
+</html>
+
+
